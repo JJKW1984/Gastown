@@ -1,0 +1,67 @@
+# =============================================================================
+# Gastown — .gitignore
+# =============================================================================
+
+# --- Secrets & environment ---
+.env
+.env.*
+!.env.example
+
+# --- Python bytecode ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# --- Build / packaging ---
+*.egg-info/
+dist/
+build/
+*.egg
+MANIFEST
+wheels/
+*.whl
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+.virtualenv/
+
+# --- Test & coverage artifacts ---
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+junit.xml
+
+# --- Benchmark history (generated data, not source) ---
+.benchmarks/
+
+# --- Gastown runtime data ---
+*.db
+*.db-shm
+*.db-wal
+gastown.db*
+.worktrees/
+
+# --- Generated reports (reproducible from tests) ---
+PERFORMANCE_REPORT.md
+TEST_REPORT.md
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs ---
+*.log
+logs/

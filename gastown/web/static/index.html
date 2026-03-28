@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gastown</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .status-pending    { @apply bg-gray-100 text-gray-700; }
+    .status-in_progress{ background:#fef3c7; color:#92400e; }
+    .status-done       { background:#d1fae5; color:#065f46; }
+    .status-failed     { background:#fee2e2; color:#991b1b; }
+    .status-merged     { background:#dbeafe; color:#1e40af; }
+    .status-rejected   { background:#fce7f3; color:#9d174d; }
+    .status-merging    { background:#ede9fe; color:#5b21b6; }
+    .status-blocked    { background:#ffedd5; color:#9a3412; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:9999px; font-size:0.75rem; font-weight:600; }
+    #log-panel pre { white-space:pre-wrap; word-break:break-all; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen font-sans">
+
+<!-- Header -->
+<header class="bg-gray-900 text-white px-6 py-4 flex items-center gap-3 shadow">
+  <span class="text-2xl">🏙️</span>
+  <h1 class="text-xl font-bold tracking-tight">Gastown</h1>
+  <span class="ml-auto text-xs text-gray-400">multi-agent coordinator</span>
+</header>
+
+<div class="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+  <!-- Left column: Rigs + Run -->
+  <div class="lg:col-span-1 flex flex-col gap-6">
+
+    <!-- Rigs Panel -->
+    <div class="bg-white rounded-xl shadow p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-gray-800">Rigs</h2>
+        <button onclick="showAddRig()" class="text-xs bg-gray-900 text-white px-3 py-1 rounded-full hover:bg-gray-700">+ Add Rig</button>
+      </div>
+      <div id="rig-list" class="text-sm text-gray-500">(loading…)</div>
+    </div>
+
+    <!-- Run Panel -->
+    <div class="bg-white rounded-xl shadow p-5">
+      <h2 class="font-semibold text-gray-800 mb-4">New Run</h2>
+      <label class="block text-xs font-medium text-gray-600 mb-1">Rig</label>
+      <select id="run-rig" class="w-full border rounded px-2 py-1.5 text-sm mb-3">
+        <option value="">— select rig —</option>
+      </select>
+      <label class="block text-xs font-medium text-gray-600 mb-1">Goal</label>
+      <textarea id="run-goal" rows="4" placeholder="e.g. add user authentication with JWT tokens"
+        class="w-full border rounded px-2 py-1.5 text-sm mb-3 resize-none"></textarea>
+      <label class="block text-xs font-medium text-gray-600 mb-1">
+        Max Concurrent Polecats: <span id="concurrent-label">4</span>
+      </label>
+      <input type="range" min="1" max="12" value="4" id="run-concurrent"
+        oninput="document.getElementById('concurrent-label').textContent=this.value"
+        class="w-full mb-4" />
+      <button onclick="startRun()" id="run-btn"
+        class="w-full bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-semibold py-2 rounded-lg transition">
+        🚀 Dispatch Polecats
+      </button>
+      <div id="run-status-msg" class="mt-2 text-xs text-gray-500"></div>
+    </div>
+
+  </div>
+
+  <!-- Right column: Beads status + Log -->
+  <div class="lg:col-span-2 flex flex-col gap-6">
+
+    <!-- Live Status Table -->
+    <div class="bg-white rounded-xl shadow p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-gray-800">Beads</h2>
+        <div class="flex gap-2 items-center">
+          <select id="filter-rig" onchange="filterBeads()" class="border rounded px-2 py-1 text-xs">
+            <option value="">All rigs</option>
+          </select>
+          <button onclick="refreshBeads()" class="text-xs text-gray-500 hover:text-gray-900">⟳ Refresh</button>
+        </div>
+      </div>
+      <div id="bead-table-wrap" class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs text-gray-400 border-b">
+              <th class="pb-2 pr-4">ID</th>
+              <th class="pb-2 pr-4">Title</th>
+              <th class="pb-2 pr-4">Status</th>
+              <th class="pb-2">Priority</th>
+            </tr>
+          </thead>
+          <tbody id="bead-tbody">
+            <tr><td colspan="4" class="py-4 text-center text-gray-400 text-xs">No beads yet. Start a run.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Live Event Feed -->
+    <div class="bg-white rounded-xl shadow p-5">
+      <h2 class="font-semibold text-gray-800 mb-2">Live Events</h2>
+      <div id="event-feed" class="h-48 overflow-y-auto bg-gray-900 rounded p-3 text-xs font-mono text-green-400 space-y-1">
+        <div class="text-gray-500">Waiting for run…</div>
+      </div>
+    </div>
+
+    <!-- Log Panel (shown on bead click) -->
+    <div id="log-panel" class="bg-white rounded-xl shadow p-5 hidden">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold text-gray-800">Bead Log: <span id="log-bead-id" class="font-mono text-yellow-600"></span></h2>
+        <button onclick="hideLog()" class="text-xs text-gray-400 hover:text-gray-800">✕ Close</button>
+      </div>
+      <div id="log-content" class="h-64 overflow-y-auto bg-gray-900 rounded p-3 text-xs font-mono text-gray-300 space-y-1"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Add Rig Modal -->
+<div id="add-rig-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 flex-col">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+    <h3 class="font-semibold text-gray-800 mb-4">Add Rig</h3>
+    <label class="block text-xs font-medium text-gray-600 mb-1">Repository Path</label>
+    <input id="rig-path" type="text" placeholder="/absolute/path/to/repo"
+      class="w-full border rounded px-2 py-1.5 text-sm mb-3" />
+    <label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+    <input id="rig-name" type="text" placeholder="my-project"
+      class="w-full border rounded px-2 py-1.5 text-sm mb-3" />
+    <label class="block text-xs font-medium text-gray-600 mb-1">Description (optional)</label>
+    <input id="rig-desc" type="text" placeholder=""
+      class="w-full border rounded px-2 py-1.5 text-sm mb-5" />
+    <div id="rig-error" class="text-red-500 text-xs mb-3 hidden"></div>
+    <div class="flex gap-3">
+      <button onclick="addRig()" class="flex-1 bg-gray-900 text-white py-2 rounded-lg font-semibold hover:bg-gray-700 text-sm">Add Rig</button>
+      <button onclick="hideAddRig()" class="flex-1 border py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let allRigs = [];
+let currentRunId = null;
+let currentWs = null;
+let beadRows = {}; // bead_id -> <tr> element
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+  loadRigs();
+  setInterval(refreshBeads, 5000);
+});
+
+// ---------------------------------------------------------------------------
+// Rigs
+// ---------------------------------------------------------------------------
+async function loadRigs() {
+  try {
+    const res = await fetch('/api/rigs');
+    allRigs = await res.json();
+    renderRigList();
+    renderRigSelects();
+  } catch (e) {
+    document.getElementById('rig-list').textContent = 'Error loading rigs';
+  }
+}
+
+function renderRigList() {
+  const el = document.getElementById('rig-list');
+  if (!allRigs.length) { el.textContent = 'No rigs yet.'; return; }
+  el.innerHTML = allRigs.map(r => `
+    <div class="flex items-center justify-between py-1.5 border-b last:border-0 cursor-pointer hover:bg-gray-50 px-1 rounded"
+         onclick="selectRig('${r.id}')">
+      <div>
+        <div class="font-medium text-gray-800">${esc(r.name)}</div>
+        <div class="text-xs text-gray-400 font-mono truncate max-w-[200px]">${esc(r.repo_path)}</div>
+      </div>
+      <span class="text-xs text-gray-400">${esc(r.id)}</span>
+    </div>
+  `).join('');
+}
+
+function renderRigSelects() {
+  const opts = allRigs.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join('');
+  document.getElementById('run-rig').innerHTML = '<option value="">— select rig —</option>' + opts;
+  document.getElementById('filter-rig').innerHTML = '<option value="">All rigs</option>' + opts;
+}
+
+function selectRig(rigId) {
+  document.getElementById('run-rig').value = rigId;
+  document.getElementById('filter-rig').value = rigId;
+  filterBeads();
+}
+
+function showAddRig() {
+  const modal = document.getElementById('add-rig-modal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function hideAddRig() {
+  document.getElementById('add-rig-modal').classList.remove('flex');
+  document.getElementById('add-rig-modal').classList.add('hidden');
+  document.getElementById('rig-error').classList.add('hidden');
+}
+
+async function addRig() {
+  const path = document.getElementById('rig-path').value.trim();
+  const name = document.getElementById('rig-name').value.trim();
+  const desc = document.getElementById('rig-desc').value.trim();
+  const errEl = document.getElementById('rig-error');
+
+  if (!path || !name) { errEl.textContent = 'Path and name are required.'; errEl.classList.remove('hidden'); return; }
+
+  try {
+    const res = await fetch('/api/rigs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path, name, description: desc}),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      errEl.textContent = data.detail || 'Error creating rig';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    hideAddRig();
+    await loadRigs();
+  } catch (e) {
+    errEl.textContent = String(e);
+    errEl.classList.remove('hidden');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Runs
+// ---------------------------------------------------------------------------
+async function startRun() {
+  const goal = document.getElementById('run-goal').value.trim();
+  const rigId = document.getElementById('run-rig').value;
+  const maxConcurrent = parseInt(document.getElementById('run-concurrent').value);
+  const msgEl = document.getElementById('run-status-msg');
+
+  if (!goal) { msgEl.textContent = 'Please enter a goal.'; return; }
+  if (!rigId) { msgEl.textContent = 'Please select a rig.'; return; }
+
+  document.getElementById('run-btn').disabled = true;
+  document.getElementById('run-btn').textContent = '⏳ Dispatching…';
+  msgEl.textContent = '';
+
+  try {
+    const res = await fetch('/api/runs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({goal, rig_id: rigId, max_concurrent: maxConcurrent}),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      msgEl.textContent = data.detail || 'Failed to start run';
+      resetRunBtn();
+      return;
+    }
+    const data = await res.json();
+    currentRunId = data.run_id;
+    msgEl.textContent = `Run ${data.run_id.slice(0,8)}… started`;
+    connectWebSocket(data.run_id);
+  } catch (e) {
+    msgEl.textContent = String(e);
+    resetRunBtn();
+  }
+}
+
+function resetRunBtn() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = false;
+  btn.textContent = '🚀 Dispatch Polecats';
+}
+
+function connectWebSocket(runId) {
+  if (currentWs) currentWs.close();
+  clearEventFeed();
+  const wsUrl = `ws://${location.host}/ws/runs/${runId}`;
+  currentWs = new WebSocket(wsUrl);
+
+  currentWs.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.event_type === 'run_complete') {
+      appendEvent('✅ Run complete!', 'text-green-300');
+      renderResult(msg.result);
+      resetRunBtn();
+      refreshBeads();
+    } else if (msg.event_type === 'run_failed') {
+      appendEvent(`❌ Run failed: ${msg.error}`, 'text-red-400');
+      resetRunBtn();
+    } else {
+      const icon = eventIcon(msg.event_type);
+      appendEvent(`${icon} [${msg.bead_id}] ${msg.event_type}: ${msg.details || ''}`, eventColor(msg.event_type));
+      updateBeadRow(msg.bead_id);
+    }
+  };
+  currentWs.onerror = () => appendEvent('⚠️ WebSocket error', 'text-red-400');
+  currentWs.onclose = () => {
+    appendEvent('─ connection closed', 'text-gray-500');
+    resetRunBtn();
+  };
+}
+
+function renderResult(result) {
+  const msgEl = document.getElementById('run-status-msg');
+  const merged = (result.merged || []).length;
+  const rejected = (result.rejected || []).length;
+  msgEl.innerHTML = `<span class="text-green-700 font-medium">✓ Merged: ${merged}</span>&nbsp;
+                     <span class="text-red-600">✗ Rejected: ${rejected}</span><br>
+                     <em>${esc(result.mayor_review || '')}</em>`;
+}
+
+// ---------------------------------------------------------------------------
+// Beads
+// ---------------------------------------------------------------------------
+async function refreshBeads() {
+  const rigFilter = document.getElementById('filter-rig').value;
+  let beads = [];
+
+  if (rigFilter) {
+    try {
+      const res = await fetch(`/api/rigs/${rigFilter}/beads`);
+      beads = await res.json();
+    } catch(e) {}
+  } else {
+    for (const rig of allRigs) {
+      try {
+        const res = await fetch(`/api/rigs/${rig.id}/beads`);
+        const rb = await res.json();
+        beads = beads.concat(rb);
+      } catch(e) {}
+    }
+  }
+
+  renderBeadTable(beads);
+}
+
+function filterBeads() { refreshBeads(); }
+
+function renderBeadTable(beads) {
+  const tbody = document.getElementById('bead-tbody');
+  if (!beads.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-400 text-xs">No beads yet.</td></tr>';
+    beadRows = {};
+    return;
+  }
+  beadRows = {};
+  tbody.innerHTML = beads.map(b => `
+    <tr id="bead-${b.id}" class="border-b last:border-0 hover:bg-gray-50 cursor-pointer"
+        onclick="showLog('${b.id}')">
+      <td class="py-2 pr-4 font-mono text-xs text-gray-500">${esc(b.id)}</td>
+      <td class="py-2 pr-4 text-sm">${esc(b.title)}</td>
+      <td class="py-2 pr-4"><span class="badge status-${b.status}">${b.status}</span></td>
+      <td class="py-2 text-xs text-gray-400">${b.priority}</td>
+    </tr>
+  `).join('');
+  beads.forEach(b => { beadRows[b.id] = document.getElementById(`bead-${b.id}`); });
+}
+
+async function updateBeadRow(beadId) {
+  try {
+    const res = await fetch(`/api/beads/${beadId}`);
+    if (!res.ok) return;
+    const bead = await res.json();
+    const row = beadRows[beadId];
+    if (row) {
+      row.cells[2].innerHTML = `<span class="badge status-${bead.status}">${bead.status}</span>`;
+    } else {
+      // New bead — reload table
+      refreshBeads();
+    }
+  } catch(e) {}
+}
+
+// ---------------------------------------------------------------------------
+// Log Panel
+// ---------------------------------------------------------------------------
+async function showLog(beadId) {
+  document.getElementById('log-bead-id').textContent = beadId;
+  document.getElementById('log-panel').classList.remove('hidden');
+  const el = document.getElementById('log-content');
+  el.innerHTML = '<div class="text-gray-500">Loading…</div>';
+
+  try {
+    const res = await fetch(`/api/beads/${beadId}/logs`);
+    const events = await res.json();
+    if (!events.length) { el.innerHTML = '<div class="text-gray-500">No events yet.</div>'; return; }
+    el.innerHTML = events.map(ev => `
+      <div><span class="text-gray-500">${ev.timestamp ? ev.timestamp.slice(11,19) : ''}</span>
+           <span class="text-yellow-400 ml-2">${esc(ev.event_type)}</span>
+           <span class="text-gray-300 ml-2">${esc(ev.details || '')}</span></div>
+    `).join('');
+    el.scrollTop = el.scrollHeight;
+  } catch(e) {
+    el.innerHTML = `<div class="text-red-400">Error: ${e}</div>`;
+  }
+}
+
+function hideLog() { document.getElementById('log-panel').classList.add('hidden'); }
+
+// ---------------------------------------------------------------------------
+// Event feed helpers
+// ---------------------------------------------------------------------------
+function clearEventFeed() {
+  document.getElementById('event-feed').innerHTML = '';
+}
+
+function appendEvent(msg, colorClass = 'text-green-400') {
+  const feed = document.getElementById('event-feed');
+  const div = document.createElement('div');
+  div.className = colorClass;
+  div.textContent = msg;
+  feed.appendChild(div);
+  feed.scrollTop = feed.scrollHeight;
+  // Trim old entries
+  while (feed.children.length > 200) feed.removeChild(feed.firstChild);
+}
+
+function eventIcon(type) {
+  const icons = {heartbeat:'💓', done:'✅', failed:'❌', nudge:'👋', stuck:'⚠️'};
+  return icons[type] || '•';
+}
+function eventColor(type) {
+  const colors = {heartbeat:'text-gray-400', done:'text-green-300', failed:'text-red-400',
+                  nudge:'text-yellow-400', stuck:'text-orange-400'};
+  return colors[type] || 'text-gray-300';
+}
+
+// ---------------------------------------------------------------------------
+// Utils
+// ---------------------------------------------------------------------------
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>
