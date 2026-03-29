@@ -1,0 +1,262 @@
+name: Azure Web App Deploy (OpenTofu / Terraform)
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/azure-webapp-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "GitHub environment for approval gating"
+        required: true
+        default: "production"
+        type: string
+      apply:
+        description: "Run tofu apply and deploy image"
+        required: true
+        default: false
+        type: boolean
+      image_tag:
+        description: "Optional image tag to deploy (defaults to commit SHA)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_WORKING_DIR: infra/terraform
+
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  TF_VAR_location: ${{ vars.AZURE_LOCATION }}
+  TF_VAR_environment: ${{ vars.AZURE_ENV_NAME }}
+  TF_VAR_resource_group_name: ${{ vars.RESOURCE_GROUP_NAME }}
+  TF_VAR_app_service_plan_name: ${{ vars.APP_SERVICE_PLAN_NAME }}
+  TF_VAR_web_app_name: ${{ vars.WEBAPP_NAME }}
+  TF_VAR_acr_name: ${{ vars.ACR_NAME }}
+
+jobs:
+  terraform-lint:
+    name: OpenTofu/Terraform Lint and Validate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Check OpenTofu formatting
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: tofu fmt -check -recursive
+
+      - name: OpenTofu init (local backend for PR validation)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: tofu init -backend=false
+
+      - name: OpenTofu validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: tofu validate
+
+  terraform-plan:
+    name: OpenTofu/Terraform Plan
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: OpenTofu init (remote backend)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          tofu init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TF_STATE_CONTAINER }}" \
+            -backend-config="key=gastown-${{ vars.AZURE_ENV_NAME }}.tfstate" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: OpenTofu validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: tofu validate
+
+      - name: OpenTofu plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: tofu plan -input=false -out=tfplan
+
+      - name: Upload terraform plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_WORKING_DIR }}/tfplan
+          if-no-files-found: error
+
+  terraform-apply:
+    name: OpenTofu/Terraform Apply
+    if: github.event_name == 'workflow_dispatch' && inputs.apply == true
+    needs:
+      - terraform-plan
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      resource_group_name: ${{ steps.tf_outputs.outputs.resource_group_name }}
+      acr_name: ${{ steps.tf_outputs.outputs.acr_name }}
+      acr_login_server: ${{ steps.tf_outputs.outputs.acr_login_server }}
+      web_app_name: ${{ steps.tf_outputs.outputs.web_app_name }}
+      web_app_default_hostname: ${{ steps.tf_outputs.outputs.web_app_default_hostname }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download terraform plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_WORKING_DIR }}
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: OpenTofu init (remote backend)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          tofu init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TF_STATE_CONTAINER }}" \
+            -backend-config="key=gastown-${{ vars.AZURE_ENV_NAME }}.tfstate" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: OpenTofu apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: tofu apply -input=false tfplan
+
+      - name: Export OpenTofu outputs
+        id: tf_outputs
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "resource_group_name=$(tofu output -raw resource_group_name)" >> "$GITHUB_OUTPUT"
+          echo "acr_name=$(tofu output -raw acr_name)" >> "$GITHUB_OUTPUT"
+          echo "acr_login_server=$(tofu output -raw acr_login_server)" >> "$GITHUB_OUTPUT"
+          echo "web_app_name=$(tofu output -raw web_app_name)" >> "$GITHUB_OUTPUT"
+          echo "web_app_default_hostname=$(tofu output -raw web_app_default_hostname)" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    name: Build and Push Container to ACR
+    if: github.event_name == 'workflow_dispatch' && inputs.apply == true
+    needs:
+      - terraform-apply
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.pick_tag.outputs.image_tag }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Pick image tag
+        id: pick_tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            IMAGE_TAG="${{ inputs.image_tag }}"
+          else
+            IMAGE_TAG="${GITHUB_SHA}"
+          fi
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ACR
+        run: az acr login --name "${{ needs.terraform-apply.outputs.acr_name }}"
+
+      - name: Build and push image
+        run: |
+          ACR_LOGIN_SERVER="${{ needs.terraform-apply.outputs.acr_login_server }}"
+          IMAGE_TAG="${{ steps.pick_tag.outputs.image_tag }}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --tag "${ACR_LOGIN_SERVER}/gastown:${IMAGE_TAG}" \
+            --tag "${ACR_LOGIN_SERVER}/gastown:latest" \
+            --push .
+
+  deploy-webapp:
+    name: Deploy Image to Azure Web App
+    if: github.event_name == 'workflow_dispatch' && inputs.apply == true
+    needs:
+      - terraform-apply
+      - build-and-push
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+      url: https://${{ needs.terraform-apply.outputs.web_app_default_hostname }}
+
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Point web app to the pushed image
+        run: |
+          az webapp config container set \
+            --name "${{ needs.terraform-apply.outputs.web_app_name }}" \
+            --resource-group "${{ needs.terraform-apply.outputs.resource_group_name }}" \
+            --container-image-name "${{ needs.terraform-apply.outputs.acr_login_server }}/gastown:${{ needs.build-and-push.outputs.image_tag }}" \
+            --container-registry-url "https://${{ needs.terraform-apply.outputs.acr_login_server }}"
+
+      - name: Ensure web app uses managed identity for ACR pulls
+        run: |
+          az webapp config set \
+            --name "${{ needs.terraform-apply.outputs.web_app_name }}" \
+            --resource-group "${{ needs.terraform-apply.outputs.resource_group_name }}" \
+            --generic-configurations '{"acrUseManagedIdentityCreds": true}'
+
+      - name: Restart web app
+        run: |
+          az webapp restart \
+            --name "${{ needs.terraform-apply.outputs.web_app_name }}" \
+            --resource-group "${{ needs.terraform-apply.outputs.resource_group_name }}"
+
+      - name: Print deployment URL
+        run: echo "Deployed to https://${{ needs.terraform-apply.outputs.web_app_default_hostname }}"

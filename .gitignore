@@ -65,3 +65,12 @@ desktop.ini
 # --- Logs ---
 *.log
 logs/
+
+# --- Terraform ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.auto.tfvars
+*.tfvars
+!*.tfvars.example

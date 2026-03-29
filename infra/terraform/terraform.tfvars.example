@@ -1,0 +1,28 @@
+prefix                = "gastown"
+environment           = "prod"
+location              = "eastus"
+resource_group_name   = "gastown-prod-rg"
+app_service_plan_name = "gastown-prod-plan"
+web_app_name          = "gastown-prod-web"
+acr_name              = "gastownprodacr"
+
+service_plan_sku          = "B1"
+enable_persistent_storage = true
+db_mount_path             = "/mnt/data"
+db_file_name              = "gastown.db"
+
+image_name = "gastown"
+image_tag  = "latest"
+
+gastown_model            = "anthropic/claude-sonnet-4-6"
+max_concurrent_polecats  = 4
+stuck_timeout_seconds    = 120
+
+app_settings = {
+  # Set one provider block before deploy (secret values should be configured in Web App settings or Key Vault references):
+  # ANTHROPIC_API_KEY = ""
+  # OPENAI_API_KEY    = ""
+  # AZURE_API_KEY     = ""
+  # AZURE_API_BASE    = ""
+  # AZURE_API_VERSION = "2024-02-01"
+}
