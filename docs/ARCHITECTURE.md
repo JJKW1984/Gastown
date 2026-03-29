@@ -307,7 +307,7 @@ SQLite database (`gastown.db` by default). WAL journal mode.
 | `bead_id` | TEXT | Nullable |
 | `polecat_id` | TEXT | Nullable |
 | `event_type` | TEXT | e.g. `decomposed`, `polecat_start`, `witness_nudge` |
-| `details` | TEXT | Capped at 200–500 chars |
+| `details` | TEXT | Free-form JSON/text; some call sites truncate to ~200–500 chars, but no DB-level cap is enforced |
 | `timestamp` | TEXT | ISO 8601 UTC |
 
 ---

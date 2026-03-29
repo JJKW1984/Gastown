@@ -319,10 +319,9 @@ from gastown.storage import GastownDB
 
 
 @pytest.fixture
-def db(tmp_path):
+async def db(tmp_path):
     db = GastownDB(str(tmp_path / "test.db"))
-    import asyncio
-    asyncio.get_event_loop().run_until_complete(db.initialize())
+    await db.initialize()
     return db
 
 
@@ -401,6 +400,8 @@ async def test_polecat_commits_work(tmp_path):
 
     # Init a real git repo
     subprocess.run(["git", "init", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test User"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "test@example.com"], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit",
                     "--allow-empty", "-m", "init"], check=True)
 

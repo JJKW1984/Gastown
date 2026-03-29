@@ -33,7 +33,7 @@ The CLI calls `load_dotenv()` at module import. The web app (`uvicorn`) reads th
 | `GASTOWN_DB_PATH` | `gastown.db` | string | Path to the SQLite database file. Relative paths are resolved from the current working directory. |
 | `GASTOWN_HOST` | `127.0.0.1` | string | Hostname or IP to bind the web server. Use `0.0.0.0` in containers. |
 | `GASTOWN_PORT` | `8000` | integer | Port for the web server. |
-| `GASTOWN_MAX_CONCURRENT_POLECATS` | `4` | integer | Maximum number of PoleCAT worker tasks running simultaneously. Also overridable per-run via the `max_concurrent` field in `POST /api/runs`. |
+| `GASTOWN_MAX_CONCURRENT_POLECATS` | `4` | integer | Maximum number of PoleCAT worker tasks running simultaneously. If set, this environment variable overrides the per-run `max_concurrent` field in `POST /api/runs`; if unset, the per-run value (or the built-in default of `4`) is used. |
 | `GASTOWN_STUCK_TIMEOUT_SECONDS` | `120` | integer | Seconds of heartbeat silence before the Witness nudges a PoleCAT. After 3 nudges with no progress the bead is cancelled. |
 | `GASTOWN_MODEL` | `anthropic/claude-sonnet-4-6` | string | LiteLLM model string. Format: `<provider>/<model-name>`. |
 
